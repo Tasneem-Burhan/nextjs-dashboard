@@ -6,6 +6,8 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { AuthError } from 'next-auth';
 import { signIn } from '@/auth';
+import bcrypt from 'bcrypt';
+import axios from 'axios';
 
 const FormShcema = z.object({
     id: z.string(),
@@ -129,4 +131,82 @@ export async function authenticate(prevState: string | undefined, formData: Form
         }
         throw error;
     }
+}
+
+const UserFormShcema = z.object({
+    // id: z.string().optional(),
+    name: z.string({
+        required_error : "Username missing",
+    }).trim().min(6, "Give User name"),
+    email: z.string().trim().min(1, "Give a valid email Address"),
+    password: z.string().min(6, "Enter password"),
+    confirmPassword: z.string().min(6, "Enter confirm password"),
+   });
+
+export type UserState = {
+    errors?: {
+        name?: string[];
+        email?: string[];
+        password?: string[];
+        confirmPassword? : string[];
+    };
+    message?: string | null;
+}
+
+export async function userRegister(prevState : UserState , formData : FormData) {
+    console.log("clicked")
+    const uservalidatedFields = UserFormShcema.safeParse({
+        name: formData.get('name'),
+        email: formData.get('email'),
+        password: formData.get('password'),
+        confirmPassword : formData.get('confirmPassword')
+    });
+   
+    if (!uservalidatedFields.success) {
+        return {
+            errors: uservalidatedFields.error.flatten().fieldErrors,
+            message: 'Missing Fields. Failed to Create new user.',
+        };
+    }
+   
+    // Prepare data for insertion into the database
+    const { name , email , password , confirmPassword} = uservalidatedFields.data;
+
+    if (password !== confirmPassword) {
+        return {
+            errors: {
+                confirmPassword: ["Password does not match"]
+            },
+            message: 'Password and Confirm password dont match',
+        };
+    }
+    
+    const verfiyEmail = await sql 
+    ` SELECT * from users where email = ${email}`;
+    // console.log(verfiyEmail);
+    if (verfiyEmail) {
+        return {
+            errors: {
+                email: ["Email already exist!"]
+            },
+            message: 'Email already in use!',
+        };
+    }
+
+    const salt = bcrypt.genSaltSync(8);
+    // console.log(salt);
+    const hashedPassword = bcrypt.hashSync(password, salt);
+    // console.log(password,  hashedPassword);
+    try {
+        await sql`
+          INSERT INTO users (name, email, password)
+          VALUES (${name}, ${email}, ${hashedPassword})`;
+    } catch (error) {
+        return {
+            message: "Database error : failed to create New User"
+        };
+    }
+    
+    revalidatePath('/login');
+    return redirect('/login');
 }
